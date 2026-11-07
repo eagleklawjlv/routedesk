@@ -57,6 +57,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Before QApplication. Windows otherwise pins this process to python.exe
+    # and keeps the interpreter icon on the taskbar.
+    from everoute.win_taskbar import apply_windows_app_user_model_id
+
+    apply_windows_app_user_model_id()
+
     try:
         from PySide6.QtGui import QFont
         from PySide6.QtWidgets import QApplication

@@ -7,7 +7,9 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
 .\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --windowed --name EveRouteDesk `
+  --icon "everoute\assets\route-desk.ico" `
   --add-data "everoute\data;everoute\data" `
+  --add-data "everoute\assets;everoute\assets" `
   --hidden-import keyring.backends.Windows `
   launch.py
 Write-Host ""

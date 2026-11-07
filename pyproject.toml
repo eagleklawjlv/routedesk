@@ -17,7 +17,7 @@ everoute-desk = "everoute.__main__:main"
 include = ["everoute*"]
 
 [tool.setuptools.package-data]
-everoute = ["data/*.json"]
+everoute = ["data/*.json", "assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

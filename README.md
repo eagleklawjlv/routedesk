@@ -116,7 +116,9 @@ python -m pytest -q
 
 ## Optional local build
 
-No Windows executable is included. On Windows, `scripts/build_windows.ps1` creates a virtual environment and runs PyInstaller. If that script succeeds on your machine, the result is `dist\EveRouteDesk\EveRouteDesk.exe`. `scripts/build_linux.sh` is the same kind of optional folder build for Linux. The interface uses PySide6 (Qt, LGPL). Running from source does not require you to redistribute a frozen Qt build.
+No Windows executable is included. On Windows, `scripts/build_windows.ps1` creates a virtual environment and runs PyInstaller. If that script succeeds on your machine, the result is `dist\EveRouteDesk\EveRouteDesk.exe`, with `everoute/assets/route-desk.ico` embedded as the executable icon. `scripts/build_linux.sh` is the same kind of optional folder build for Linux and packs the same icon assets for the window. The interface uses PySide6 (Qt, LGPL). Running from source does not require you to redistribute a frozen Qt build.
+
+A source launch (`python -m everoute` or `pythonw -m everoute`) sets the Windows AppUserModelID `eagleklawjlv.RouteDesk` before the window opens and uses that icon for the window. That is what replaces the Python taskbar icon. The shortcut icon is only the pinned button. `scripts/update_windows_shortcut.ps1` points an existing shortcut at `route-desk.ico` and the same id. It does not change the shortcut target and it does not read routes, settings, or tokens.
 
 ## Third-party notices
 

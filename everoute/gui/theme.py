@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap, QPolygon
+
+from everoute.paths import bundled_assets_dir
+
+ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 STYLESHEET = """
 QWidget {
@@ -124,12 +128,35 @@ def apply_theme(app) -> None:
 
 
 def app_icon() -> QIcon:
+    """Multi-resolution route mark used for the window on every platform.
+
+    PNG sizes are registered explicitly so Qt does not scale one pixmap for
+    the title bar, the Linux window icon, and the Windows taskbar. The .ico
+    next to them is what the shortcut and PyInstaller executable use.
+    """
+    icon = QIcon()
+    assets = bundled_assets_dir()
+    for size in ICON_SIZES:
+        path = assets / f"route-desk-{size}.png"
+        if path.is_file():
+            icon.addFile(str(path), QSize(size, size))
+    if not icon.isNull():
+        return icon
+    return _fallback_icon()
+
+
+def _fallback_icon() -> QIcon:
     pix = QPixmap(64, 64)
-    pix.fill(QColor("#121418"))
+    pix.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pix)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor("#e0a045"))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.drawRoundedRect(8, 8, 48, 48, 10, 10)
+    painter.setBrush(QColor("#0B1F3A"))
+    painter.drawRoundedRect(2, 2, 60, 60, 14, 14)
+    painter.setBrush(QColor("#1AD4F5"))
+    painter.drawEllipse(12, 40, 12, 12)
+    painter.drawEllipse(26, 24, 12, 12)
+    painter.setBrush(QColor("#F5B12A"))
+    painter.drawPolygon(QPolygon([QPoint(46, 8), QPoint(58, 20), QPoint(46, 32), QPoint(34, 20)]))
     painter.end()
     return QIcon(pix)
