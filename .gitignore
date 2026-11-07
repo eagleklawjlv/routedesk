@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+*.spec
+.everoute-data/
+*.tmp
+agent-tools/
+
+# Local app data. Do not commit characters, tokens, or a client ID.
+settings.json
+library.json
+jobs.json
+structure-cache/
+tokens/

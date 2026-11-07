@@ -1,0 +1,24 @@
+[project]
+name = "everoute-desk"
+version = "0.1.0"
+description = "Local desktop editor for EVE Online multileg routes and autopilot waypoints."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "PySide6>=6.6,<7",
+  "PyJWT[crypto]>=2.9,<3",
+  "keyring>=25,<27",
+]
+
+[project.scripts]
+everoute-desk = "everoute.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["everoute*"]
+
+[tool.setuptools.package-data]
+everoute = ["data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
