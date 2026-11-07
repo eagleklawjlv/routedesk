@@ -22,22 +22,27 @@ from PySide6.QtWidgets import (
 
 from everoute.eve_settings import (
     COVERAGE_NOTE,
+    EVE_STILL_OPEN_MESSAGE,
     INSTRUCTIONS,
     KIND_CHAR,
     KIND_USER,
+    UNABLE_TO_VERIFY_MESSAGE,
+    ClientCheck,
+    ClientCheckFailed,
     ClientsStillRunning,
     SettingsSyncError,
     apply_copies,
     describe_character,
     describe_plan,
     identify_profile,
+    interpret_client_check,
     list_account_files,
     list_character_files,
     list_manifests,
     lookup_public_name,
     plan_copies,
     restore_manifest,
-    windows_eve_client_running,
+    windows_eve_client_status,
 )
 from everoute.http import HttpClient
 
@@ -59,7 +64,7 @@ class SettingsSyncDialog(QDialog):
         self.resize(980, 860)
         self.data_dir = Path(data_dir)
         self.library = list(library)
-        self._client_running = client_running if client_running is not None else windows_eve_client_running
+        self._client_running = client_running if client_running is not None else windows_eve_client_status
         self._http = http
         self._esi_names: dict[int, str] = {}
         self._profile = None
@@ -345,12 +350,7 @@ class SettingsSyncDialog(QDialog):
         except SettingsSyncError as exc:
             QMessageBox.warning(self, "Cannot copy", str(exc))
             return
-        if self._client_running():
-            QMessageBox.warning(
-                self,
-                "EVE is still open",
-                "Close every EVE client (exefile.exe) before copying. Nothing was written.",
-            )
+        if self._stop_unless_clients_closed():
             return
         summary = describe_plan(plans)
         answer = QMessageBox.question(
@@ -374,7 +374,7 @@ class SettingsSyncDialog(QDialog):
                 self.data_dir / BACKUP_DIRNAME,
                 clients_running=self._client_running,
             )
-        except ClientsStillRunning as exc:
+        except (ClientsStillRunning, ClientCheckFailed) as exc:
             self.status.setText(str(exc))
             return str(exc)
         except (SettingsSyncError, OSError) as exc:
@@ -396,8 +396,7 @@ class SettingsSyncDialog(QDialog):
         if not manifest or self._profile is None:
             QMessageBox.warning(self, "No backup", "Choose a profile and a backup first. Nothing was written.")
             return
-        if self._client_running():
-            QMessageBox.warning(self, "EVE is still open", "Close every EVE client before restoring. Nothing was written.")
+        if self._stop_unless_clients_closed():
             return
         answer = QMessageBox.question(
             self,
@@ -419,3 +418,17 @@ class SettingsSyncDialog(QDialog):
             return
         self.load_profile(self._profile.path)
         self.status.setText(f"Restored {len(record['files'])} file(s) from {record['restored_from']}.")
+
+    def _stop_unless_clients_closed(self) -> bool:
+        """True when Copy or Restore must stop. Running and unknown are different messages."""
+        try:
+            status = interpret_client_check(self._client_running())
+        except Exception:
+            status = ClientCheck.UNKNOWN
+        if status == ClientCheck.CLOSED:
+            return False
+        if status == ClientCheck.RUNNING:
+            QMessageBox.warning(self, "EVE is still open", EVE_STILL_OPEN_MESSAGE)
+            return True
+        QMessageBox.warning(self, "Unable to verify", UNABLE_TO_VERIFY_MESSAGE)
+        return True

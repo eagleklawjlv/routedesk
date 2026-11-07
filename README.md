@@ -111,7 +111,7 @@ No telemetry. No EVE password. No client secret in the program or in this source
 
 Tools → Copy EVE character settings copies files inside one EVE launcher profile on this computer. CCP's profile article is https://support.eveonline.com/hc/en-us/articles/5885278408860-Profile-Manager. Profiles are folders named `settings_<name>` under `%LOCALAPPDATA%\CCP\EVE\<shared-cache folder>\`.
 
-Close every EVE client first. Choose the profile folder, one source character, and the target characters, read the list of files that will be replaced, then press Copy. Launch EVE and check one target before relying on the rest.
+Close every EVE client first. Choose the profile folder, one source character, and the target characters, read the list of files that will be replaced, then press Copy. Launch EVE and check one target before relying on the rest. Copy looks for the Windows process exefile.exe without opening a console window. If that process is listed, Copy says the client is still open. If the check cannot tell, Copy says it could not verify and still writes nothing.
 
 The copy replaces `core_char_<character id>.dat` only, unless you turn on account files and pick `core_user_<account id>.dat` ids yourself. That is not all EVE settings. CCP does not publish the contents of those files. Community guides use the character file for overview and per-character UI. The account file is shared by every character on that account; guides put some display and window settings there, and they do not agree on the split. Route Desk does not guess which account file belongs to a character, and it does not copy launcher login, cache, or the rest of the folder. Each replaced file is backed up with a hash under the Route Desk data folder so you can restore it.
 

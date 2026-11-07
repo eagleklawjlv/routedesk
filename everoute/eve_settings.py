@@ -18,7 +18,9 @@ not copy launcher login data, cache, or any other filename.
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import os
 import re
@@ -26,6 +28,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -79,6 +82,38 @@ class SettingsSyncError(Exception):
 
 class ClientsStillRunning(SettingsSyncError):
     pass
+
+
+class ClientCheckFailed(SettingsSyncError):
+    """The process check did not prove the client was closed, and did not see it running."""
+
+
+class ClientCheck(Enum):
+    CLOSED = "closed"
+    RUNNING = "running"
+    UNKNOWN = "unknown"
+
+
+# tasklist.exe is a console program. pythonw has no console, so CreateProcess
+# otherwise allocates one and it flashes before the Copy warning.
+CREATE_NO_WINDOW = 0x08000000
+STARTF_USESHOWWINDOW = 0x00000001
+SW_HIDE = 0
+
+# The en-US no-match line is "which match", not "matching". Both are accepted.
+NO_MATCH_MARKERS = (
+    "no tasks are running which match the specified criteria",
+    "no tasks are running matching the specified criteria",
+    "no tasks are running",
+    "no tasks running",
+)
+
+EVE_STILL_OPEN_MESSAGE = (
+    "Close every EVE client (exefile.exe) before copying. Nothing was written."
+)
+UNABLE_TO_VERIFY_MESSAGE = (
+    "Unable to verify whether the EVE client (exefile.exe) is closed. Nothing was written."
+)
 
 
 @dataclass(frozen=True)
@@ -307,16 +342,26 @@ def _write_bytes_atomic(target: Path, payload: bytes) -> None:
             temporary.unlink()
 
 
-def _clients_closed(clients_running: Callable[[], bool]) -> None:
+def interpret_client_check(result) -> ClientCheck:
+    """Bool results stay valid for tests. Only an explicit running result means the client is open."""
+    if result is True or result == ClientCheck.RUNNING:
+        return ClientCheck.RUNNING
+    if result is False or result == ClientCheck.CLOSED:
+        return ClientCheck.CLOSED
+    if isinstance(result, ClientCheck):
+        return result
+    return ClientCheck.UNKNOWN
+
+
+def _clients_closed(clients_running: Callable[[], object]) -> None:
     try:
-        running = bool(clients_running())
+        status = interpret_client_check(clients_running())
     except Exception as exc:
-        raise SettingsSyncError(f"Could not check whether the EVE client is running ({exc}).") from exc
-    if running:
-        raise ClientsStillRunning(
-            "EVE's exefile.exe is running, or the client check did not confirm it is closed. "
-            "Close every EVE client before copying. Route Desk will not write while the client can save over these files."
-        )
+        raise ClientCheckFailed(f"{UNABLE_TO_VERIFY_MESSAGE} ({exc})") from exc
+    if status == ClientCheck.RUNNING:
+        raise ClientsStillRunning(f"EVE's exefile.exe is running. {EVE_STILL_OPEN_MESSAGE}")
+    if status == ClientCheck.UNKNOWN:
+        raise ClientCheckFailed(UNABLE_TO_VERIFY_MESSAGE)
 
 
 def apply_copies(
@@ -497,37 +542,96 @@ def restore_manifest(
     return record
 
 
-def exefile_listed(tasklist_output: str) -> bool:
-    """True when Windows tasklist reports the EVE client process exefile.exe."""
-    lowered = tasklist_output.lower()
-    if "no tasks are running" in lowered or "no tasks running" in lowered:
+def hidden_child_settings() -> dict[str, int]:
+    """Console-hide flags for a child of pythonw. CREATE_NO_WINDOW stops the flash."""
+    return {
+        "creationflags": CREATE_NO_WINDOW,
+        "dwFlags": STARTF_USESHOWWINDOW,
+        "wShowWindow": SW_HIDE,
+    }
+
+
+def hidden_windows_popen_kwargs() -> dict:
+    settings = hidden_child_settings()
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= settings["dwFlags"]
+    startupinfo.wShowWindow = settings["wShowWindow"]
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": settings["creationflags"],
+    }
+
+
+def decode_tasklist_bytes(data: bytes | None) -> str:
+    """tasklist writes UTF-16 when its output is a pipe. Do not decode that as ANSI."""
+    if not data:
+        return ""
+    if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff"):
+        return data.decode("utf-16")
+    if b"\x00" in data:
+        try:
+            return data.decode("utf-16-le")
+        except UnicodeError:
+            pass
+    for encoding in ("utf-8", "cp1252"):
+        try:
+            return data.decode(encoding)
+        except UnicodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def _csv_image_is_exefile(text: str) -> bool:
+    try:
+        rows = list(csv.reader(io.StringIO(text)))
+    except csv.Error:
         return False
-    return "exefile.exe" in lowered
+    for row in rows:
+        if len(row) < 2:
+            continue
+        image = row[0].strip().strip('"').lower()
+        pid = row[1].strip().strip('"')
+        if image == "exefile.exe" and pid.isdigit():
+            return True
+    return False
 
 
-def client_running_from_tasklist(returncode: int, output: str) -> bool:
-    """Fail closed. Empty or failed tasklist output blocks the copy."""
-    if returncode != 0 or not output.strip():
-        return True
-    return exefile_listed(output)
+def classify_tasklist(returncode: int | None, output: str) -> ClientCheck:
+    """Read tasklist /FO CSV output.
+
+    A row whose image name is exefile.exe means the client is running.
+    The en-US no-match sentence means it is not. Exit 0 with no exefile.exe
+    row is also closed, which covers a localized no-match sentence.
+    Empty output, a failed launch, or a mention of exefile.exe that is not a
+    process row is unknown — not proof the client is open.
+    """
+    text = (output or "").replace("\x00", "")
+    if _csv_image_is_exefile(text):
+        return ClientCheck.RUNNING
+    lowered = text.lower()
+    if any(marker in lowered for marker in NO_MATCH_MARKERS):
+        return ClientCheck.CLOSED
+    if returncode == 0 and text.strip() and "exefile.exe" not in lowered:
+        return ClientCheck.CLOSED
+    return ClientCheck.UNKNOWN
 
 
-def windows_eve_client_running() -> bool:
-    """Fail closed. A missing tasklist or an unexpected answer blocks the copy."""
+def windows_eve_client_status() -> ClientCheck:
+    """Ask tasklist whether exefile.exe exists. No console window is created."""
     if sys.platform != "win32":
-        return True
+        return ClientCheck.UNKNOWN
     try:
         completed = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq exefile.exe", "/FO", "CSV", "/NH"],
             capture_output=True,
-            text=True,
             timeout=5,
             check=False,
+            **hidden_windows_popen_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
-        return True
-    output = f"{completed.stdout}\n{completed.stderr}"
-    return client_running_from_tasklist(completed.returncode, output)
+        return ClientCheck.UNKNOWN
+    output = decode_tasklist_bytes(completed.stdout) + decode_tasklist_bytes(completed.stderr)
+    return classify_tasklist(completed.returncode, output)
 
 
 def describe_character(character_id: int, library, esi_names: dict[int, str] | None = None) -> str:

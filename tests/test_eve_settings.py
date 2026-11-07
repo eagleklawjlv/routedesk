@@ -12,12 +12,15 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from everoute.eve_settings import (
     KIND_USER,
+    ClientCheck,
+    ClientCheckFailed,
     ClientsStillRunning,
     SettingsSyncError,
     apply_copies,
+    classify_tasklist,
+    decode_tasklist_bytes,
     describe_character,
-    client_running_from_tasklist,
-    exefile_listed,
+    hidden_child_settings,
     identify_profile,
     list_account_files,
     list_character_files,
@@ -217,13 +220,48 @@ def test_names_come_from_library_or_public_esi_and_are_not_invented():
     assert "token" not in repr(transport.urls).lower()
 
 
-def test_tasklist_parser_recognizes_only_the_eve_client():
-    assert exefile_listed('"exefile.exe","1234","Console","1","20,000 K"') is True
-    assert exefile_listed("INFO: No tasks are running matching the specified criteria.") is False
-    assert exefile_listed('"evelauncher.exe","10","Console","1","1 K"') is False
-    assert client_running_from_tasklist(0, "INFO: No tasks are running matching the specified criteria.") is False
-    assert client_running_from_tasklist(0, "") is True
-    assert client_running_from_tasklist(1, "exefile.exe") is True
+EXACT_NO_MATCH = "INFO: No tasks are running which match the specified criteria."
+OLDER_NO_MATCH = "INFO: No tasks are running matching the specified criteria."
+RUNNING_ROW = '"exefile.exe","4820","Console","1","123,456 K"'
+
+
+def test_tasklist_parser_separates_closed_running_and_unknown():
+    assert classify_tasklist(0, EXACT_NO_MATCH) is ClientCheck.CLOSED
+    assert classify_tasklist(0, EXACT_NO_MATCH + "\r\n") is ClientCheck.CLOSED
+    assert classify_tasklist(0, OLDER_NO_MATCH) is ClientCheck.CLOSED
+    assert classify_tasklist(0, '"evelauncher.exe","10","Console","1","1 K"') is ClientCheck.CLOSED
+    assert classify_tasklist(0, "INFO: Aucune tâche en cours d'exécution.") is ClientCheck.CLOSED
+    assert classify_tasklist(0, RUNNING_ROW) is ClientCheck.RUNNING
+    assert classify_tasklist(0, '"exefile.exe","4","RDP-Tcp#0","1","20 K"\r\n') is ClientCheck.RUNNING
+    assert classify_tasklist(0, "") is ClientCheck.UNKNOWN
+    assert classify_tasklist(0, "\n") is ClientCheck.UNKNOWN
+    assert classify_tasklist(1, "ERROR: Invalid query\r\nexefile.exe") is ClientCheck.UNKNOWN
+    assert classify_tasklist(None, EXACT_NO_MATCH) is ClientCheck.CLOSED
+    utf16_info = decode_tasklist_bytes(EXACT_NO_MATCH.encode("utf-16-le"))
+    utf16_row = decode_tasklist_bytes(b"\xff\xfe" + RUNNING_ROW.encode("utf-16-le"))
+    assert classify_tasklist(0, utf16_info) is ClientCheck.CLOSED
+    assert classify_tasklist(0, utf16_row) is ClientCheck.RUNNING
+
+
+def test_tasklist_child_is_hidden_from_pythonw():
+    settings = hidden_child_settings()
+    assert settings["creationflags"] == 0x08000000
+    assert settings["dwFlags"] == 0x00000001
+    assert settings["wShowWindow"] == 0
+    import everoute.eve_settings as module
+
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    assert "hidden_windows_popen_kwargs()" in source
+    assert "text=True" not in source.split("def windows_eve_client_status", 1)[1].split("def describe_character", 1)[0]
+
+
+def test_unknown_client_check_does_not_claim_eve_is_open(tmp_path):
+    profile = profile_tree(tmp_path)
+    plans = plan_copies(profile, "core_char", SOURCE, [TARGET_A])
+    with pytest.raises(ClientCheckFailed, match="Unable to verify") as caught:
+        apply_copies(profile, plans, tmp_path / "backups", clients_running=lambda: ClientCheck.UNKNOWN)
+    assert "is running" not in str(caught.value)
+    assert (profile / f"core_char_{TARGET_A}.dat").read_bytes() == b"OLD-A"
 
 
 def test_dialog_selects_targets_previews_the_subset_and_copies_once(tmp_path, monkeypatch):
@@ -251,7 +289,13 @@ def test_dialog_selects_targets_previews_the_subset_and_copies_once(tmp_path, mo
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
     dialog._client_running = lambda: True
     dialog.copy_clicked()
-    assert warnings
+    assert warnings[-1][1] == "EVE is still open"
+    assert "exefile.exe" in warnings[-1][2]
+    assert (profile / f"core_char_{TARGET_A}.dat").read_bytes() == b"OLD-A"
+    dialog._client_running = lambda: ClientCheck.UNKNOWN
+    dialog.copy_clicked()
+    assert warnings[-1][1] == "Unable to verify"
+    assert "EVE is still open" not in warnings[-1][2]
     assert (profile / f"core_char_{TARGET_A}.dat").read_bytes() == b"OLD-A"
     dialog._client_running = lambda: False
     message = dialog.perform_copy()
