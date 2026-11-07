@@ -38,7 +38,7 @@ from everoute.account import remember_authorized_character
 from everoute.credentials import CredentialError, open_credential_store
 from everoute.esi import EsiClient, Outcome, OutcomeKind
 from everoute.gui.dialogs import AboutDialog, SetupWizard
-from everoute.gui.theme import BAND_COLORS, STATUS_COLORS
+from everoute.gui.theme import BAND_COLORS, STATUS_COLORS, app_icon
 from everoute.gui.workers import ApplyWorker, LoginWorker, StructureSearchWorker, UniverseWorker
 from everoute.http import HttpClient, NetworkError, RequestTimeout, UrlNotAllowed
 from everoute.messages import (
@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
         self._checked_ids: set[int] = set()
         self._checks_ready = False
         self.setWindowTitle("Route Desk")
+        self._native_taskbar_icon = False
         self.resize(1440, 960)
         self.setMinimumSize(980, 640)
         self._build_ui()
@@ -153,6 +154,27 @@ class MainWindow(QMainWindow):
         if self.jobs:
             self.prepare_progress(self.jobs)
         self.statusBar().showMessage(STORAGE_NOTE)
+        self.install_taskbar_icon()
+
+    def install_taskbar_icon(self) -> None:
+        """Apply the route-mark icon to this window and, on Windows, the HWND.
+
+        The HWND step runs once the native window exists. It is what the
+        taskbar reads when the process is python.exe rather than a frozen
+        executable. A shortcut icon is a separate pin and does not replace this.
+        """
+        self.setWindowIcon(app_icon())
+        if self._native_taskbar_icon:
+            return
+        # Block re-entry: creating the HWND can deliver another show event.
+        self._native_taskbar_icon = True
+        from everoute.win_taskbar import apply_native_window_icon
+
+        apply_native_window_icon(self)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.install_taskbar_icon()
 
     def _build_ui(self) -> None:
         central = QWidget()

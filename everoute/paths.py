@@ -8,10 +8,27 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-def bundled_data_dir() -> Path:
+def bundle_root() -> Path:
+    """Directory that contains data/ and assets/.
+
+    A PyInstaller build extracts those folders under sys._MEIPASS/everoute.
+    A source launch uses this package directory, including python -m everoute.
+    """
     if getattr(sys, "frozen", False):
-        return Path(getattr(sys, "_MEIPASS")) / "everoute" / "data"
-    return Path(__file__).resolve().parent / "data"
+        return Path(getattr(sys, "_MEIPASS")) / "everoute"
+    return Path(__file__).resolve().parent
+
+
+def bundled_data_dir() -> Path:
+    return bundle_root() / "data"
+
+
+def bundled_assets_dir() -> Path:
+    return bundle_root() / "assets"
+
+
+def bundled_icon_path() -> Path:
+    return bundled_assets_dir() / "route-desk.ico"
 
 
 @dataclass
