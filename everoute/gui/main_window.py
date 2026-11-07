@@ -475,6 +475,7 @@ class MainWindow(QMainWindow):
         mode_menu.addAction(self.demo_action)
         tools = self.menuBar().addMenu("Tools")
         tools.addAction("SSO setup", self.open_setup)
+        tools.addAction("Copy EVE character settings", self.open_settings_sync)
         tools.addAction("Refresh public universe cache", self.refresh_universe)
         tools.addAction("About", self.open_about)
 
@@ -1400,6 +1401,13 @@ class MainWindow(QMainWindow):
         self._reset_auth()
         self._apply_demo_banner()
         self.statusBar().showMessage("Saved SSO settings. No client secret was stored.")
+
+    def open_settings_sync(self) -> None:
+        from everoute.gui.settings_sync import SettingsSyncDialog
+
+        dialog = SettingsSyncDialog(self.store.paths.root, self.library.characters, parent=self)
+        dialog.setWindowIcon(self.windowIcon())
+        dialog.exec()
 
     def open_about(self) -> None:
         AboutDialog(self).exec()
